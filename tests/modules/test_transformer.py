@@ -86,7 +86,7 @@ def test_streaming_api():
 
 
 def test_memory_efficient():
-    for backend in ['torch']:
+    for backend in ['torch', 'xformers']:
         torch.manual_seed(1234)
         set_efficient_attention_backend(backend)
 
@@ -132,7 +132,7 @@ def test_attention_as_float32():
 
 @torch.no_grad()
 def test_streaming_memory_efficient():
-    for backend in ['torch']:
+    for backend in ['torch', 'xformers']:
         torch.manual_seed(1234)
         set_efficient_attention_backend(backend)
         tr = StreamingTransformer(16, 4, 2, causal=True, dropout=0., custom=True)
@@ -173,7 +173,7 @@ def test_cross_attention():
         cross_x = torch.randn(2, 3, 16)
         y_ref = m(x)
         y_cross_zero = m_cross(x, cross_attention_src=0 * cross_x)
-        # With norm_first, the two should be exactly the same,
+        # With norm_first, the two should be exactly yhe same,
         # but with norm_first=False, we get 2 normalization in a row
         # and the epsilon value leads to a tiny change.
         atol = 0. if norm_first else 1e-6

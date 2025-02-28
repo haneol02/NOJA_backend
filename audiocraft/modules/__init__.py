@@ -3,7 +3,6 @@
 #
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
-"""Modules used for building the models."""
 
 # flake8: noqa
 from .conv import (
@@ -19,4 +18,3 @@ from .conv import (
 )
 from .lstm import StreamableLSTM
 from .seanet import SEANetEncoder, SEANetDecoder
-from .transformer import StreamingTransformer

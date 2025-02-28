@@ -1,8 +1,11 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-#
-# This source code is licensed under the license found in the
-# LICENSE file in the root directory of this source tree.
+"""
+ Copyright (c) Meta Platforms, Inc. and affiliates.
+ All rights reserved.
+ 
+ This source code is licensed under the license found in the
+ LICENSE file in the root directory of this source tree.
+ 
+"""
 
 from pathlib import Path
 
@@ -10,7 +13,7 @@ from setuptools import setup, find_packages
 
 
 NAME = 'audiocraft'
-DESCRIPTION = 'Audio generation research library for PyTorch'
+DESCRIPTION = 'Audio research library for PyTorch'
 
 URL = 'https://github.com/facebookresearch/audiocraft'
 AUTHOR = 'FAIR Speech & Audio'
@@ -47,9 +50,8 @@ setup(
     install_requires=REQUIRED,
     extras_require={
         'dev': ['coverage', 'flake8', 'mypy', 'pdoc3', 'pytest'],
-        'wm': ['audioseal'],
     },
-    packages=[p for p in find_packages() if p.startswith('audiocraft')],
+    packages=find_packages(),
     package_data={'audiocraft': ['py.typed']},
     include_package_data=True,
     license='MIT License',

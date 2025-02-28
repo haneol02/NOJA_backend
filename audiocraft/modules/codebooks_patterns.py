@@ -30,7 +30,7 @@ class Pattern:
 
     The pattern provides convenient methods to build and revert interleaved sequences from it:
     ``build_pattern_sequence`` maps a given a dense input tensor of multi-codebook sequence from [B, K, T]
-        to the interleaved sequence of shape [B, K, S] applying the pattern, with B being the batch size,
+        to the interleaved sequence of shape [B, K, S] applying the pattern, with S being the batch size,
         K being the number of codebooks, T the number of original timesteps and S the number of sequence steps
         for the output sequence. The unfilled positions are replaced with a special token and the built sequence
         is returned along with a mask indicating valid tokens.
@@ -49,6 +49,7 @@ class Pattern:
 
     def __post_init__(self):
         assert len(self.layout) > 0
+        assert self.layout[0] == []
         self._validate_layout()
         self._build_reverted_sequence_scatter_indexes = lru_cache(100)(self._build_reverted_sequence_scatter_indexes)
         self._build_pattern_sequence_scatter_indexes = lru_cache(100)(self._build_pattern_sequence_scatter_indexes)
@@ -92,9 +93,6 @@ class Pattern:
         valid_step = len(self.layout) - self.max_delay
         return self.layout[:valid_step]
 
-    def starts_with_special_token(self):
-        return self.layout[0] == []
-
     def get_sequence_coords_with_timestep(self, t: int, q: tp.Optional[int] = None):
         """Get codebook coordinates in the layout that corresponds to the specified timestep t
         and optionally to the codebook q. Coordinates are returned as a tuple with the sequence step
@@ -124,7 +122,7 @@ class Pattern:
         Args:
             timesteps (int): Maximum number of timesteps steps to consider.
             keep_only_valid_steps (bool): Restrict the pattern layout to match only valid steps.
-            device (torch.device or str): Device for created tensors.
+            device (Union[torch.device, str]): Device for created tensors.
         Returns:
             indexes (torch.Tensor): Indexes corresponding to the sequence, of shape [K, S].
             mask (torch.Tensor): Mask corresponding to indexes that matches valid indexes, of shape [K, S].
@@ -191,9 +189,9 @@ class Pattern:
             keep_only_valid_steps (bool): Build a sequence from the pattern up to valid (= fully defined) steps.
                 Steps that are beyond valid steps will be replaced by the special_token in that case.
             is_model_output (bool): Whether to keep the sequence item corresponding to initial special token or not.
-            device (torch.device or str): Device for created tensors.
+            device (Union[torch.device, str]): Device for created tensors.
         Returns:
-            indexes (torch.Tensor): Indexes for reconstructing the output, of shape [K, T].
+            torch.Tensor: Indexes for reconstructing the output, of shape [K, T].
             mask (torch.Tensor): Mask corresponding to indexes that matches valid indexes of shape [K, T].
         """
         ref_layout = self.valid_layout if keep_only_valid_steps else self.layout
@@ -204,7 +202,7 @@ class Pattern:
             f"sequence to revert is longer than the defined pattern: {sequence_steps} > {len(ref_layout)}"
 
         # ensure we take the appropriate indexes to keep the model output from the first special token as well
-        if is_model_output and self.starts_with_special_token():
+        if is_model_output:
             ref_layout = ref_layout[1:]
 
         # single item indexing being super slow with pytorch vs. numpy, so we use numpy here
@@ -297,7 +295,7 @@ class CodebooksPatternProvider(ABC):
         """Builds pattern with specific interleaving between codebooks.
 
         Args:
-            timesteps (int): Total number of timesteps.
+            timesteps (int): Total numer of timesteps.
         """
         raise NotImplementedError()
 
@@ -320,7 +318,7 @@ class DelayedPatternProvider(CodebooksPatternProvider):
 
     Args:
         n_q (int): Number of codebooks.
-        delays (list of int, optional): Delay for each of the codebooks.
+        delays (Optional[List[int]]): Delay for each of the codebooks.
             If delays not defined, each codebook is delayed by 1 compared to the previous one.
         flatten_first (int): Flatten the first N timesteps.
         empty_initial (int): Prepend with N empty list of coordinates.
@@ -337,8 +335,7 @@ class DelayedPatternProvider(CodebooksPatternProvider):
         assert sorted(self.delays) == self.delays
 
     def get_pattern(self, timesteps: int) -> Pattern:
-        omit_special_token = self.empty_initial < 0
-        out: PatternLayout = [] if omit_special_token else [[]]
+        out: PatternLayout = [[]]
         max_delay = max(self.delays)
         if self.empty_initial:
             out += [[] for _ in range(self.empty_initial)]
@@ -363,10 +360,9 @@ class ParallelPatternProvider(DelayedPatternProvider):
 
     Args:
         n_q (int): Number of codebooks.
-        empty_initial (int): Prepend with N empty list of coordinates.
     """
-    def __init__(self, n_q: int, empty_initial: int = 0):
-        super().__init__(n_q, [0] * n_q, empty_initial=empty_initial)
+    def __init__(self, n_q: int):
+        super().__init__(n_q, [0] * n_q)
 
 
 class UnrolledPatternProvider(CodebooksPatternProvider):
@@ -410,10 +406,10 @@ class UnrolledPatternProvider(CodebooksPatternProvider):
 
     Args:
         n_q (int): Number of codebooks.
-        flattening (list of int, optional): Flattening schema over the codebooks. If not defined,
+        flattening (Optional[List[int]]): Flattening schema over the codebooks. If not defined,
             the codebooks will be flattened to 1 codebook per step, meaning that the sequence will
             have n_q extra steps for each timestep.
-        delays (list of int, optional): Delay for each of the codebooks. If not defined,
+        delays (Optional[List[int]]): Delay for each of the codebooks. If not defined,
             no delay is added and therefore will default to [0] * ``n_q``.
             Note that two codebooks that will be flattened to the same inner step
             should have the same delay, otherwise the pattern is considered as invalid.
@@ -466,7 +462,7 @@ class UnrolledPatternProvider(CodebooksPatternProvider):
         """Builds pattern for delay across codebooks.
 
         Args:
-            timesteps (int): Total number of timesteps.
+            timesteps (int): Total numer of timesteps.
         """
         # the PatternLayout is built as a tuple of sequence position and list of coordinates
         # so that it can be reordered properly given the required delay between codebooks of given timesteps
@@ -490,18 +486,13 @@ class UnrolledPatternProvider(CodebooksPatternProvider):
         return Pattern(out, n_q=self.n_q, timesteps=timesteps)
 
 
-class CoarseFirstPattern(CodebooksPatternProvider):
-    """First generates all the codebooks #1 (e.g. coarser), then the remaining ones,
-    potentially with delays.
-
-    ..Warning:: You must always generate the full training duration at test time, for instance,
-        30 seconds, as otherwise, the fine codebooks will start being generated in an unexpected
-        location. This is due to the non causality of the remaining codebooks with respect to
-        the first ones.
+class VALLEPattern(CodebooksPatternProvider):
+    """Almost VALL-E style pattern. We futher allow some delays for the
+    codebooks other than the first one.
 
     Args:
         n_q (int): Number of codebooks.
-        delays (list of int, optional): Delay for each of the codebooks.
+        delays (Optional[List[int]]): Delay for each of the codebooks.
             If delays not defined, each codebook is delayed by 1 compared to the previous one.
     """
     def __init__(self, n_q: int, delays: tp.Optional[tp.List[int]] = None):

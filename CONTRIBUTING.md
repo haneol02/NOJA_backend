@@ -1,11 +1,11 @@
-# Contributing to AudioCraft
+# Contributing to Audiocraft
 
 We want to make contributing to this project as easy and transparent as
 possible.
 
 ## Pull Requests
 
-AudioCraft is the implementation of a research paper.
+Audiocraft is the implementation of a research paper.
 Therefore, we do not plan on accepting many pull requests for new features.
 We certainly welcome them for bug fixes.
 
